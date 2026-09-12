@@ -118,7 +118,7 @@ footer { border-top:1px solid var(--line); padding:12px 16px calc(12px + env(saf
       <div class="mbar"><div class="mfill" id="f-tts"></div></div><div class="msz" id="s-tts"></div></div>
     <div class="mrow"><div class="mlab">👂 Ears — Whisper tiny (EN)</div>
       <div class="mbar"><div class="mfill" id="f-asr"></div></div><div class="msz" id="s-asr"></div></div>
-    <div class="msys">First load downloads ≈ 2.6 GB; after that everything is cached on the phone (brain on disk ~30 s, voice+ears instant). Wi-Fi recommended. <span style="opacity:.55">build b24</span></div>
+    <div class="msys">First load downloads ≈ 2.6 GB; after that everything is cached on the phone (brain on disk ~30 s, voice+ears instant). Wi-Fi recommended. <span style="opacity:.55">build b27</span></div>
   </div>
   <div id="log"></div>
   <footer>
@@ -187,7 +187,43 @@ footer { border-top:1px solid var(--line); padding:12px 16px calc(12px + env(saf
   </div>
 </div>
 
-<script src="/od.js?v=27" onerror="var h=document.getElementById('hud'); if(h){h.textContent='❌ od.js NON caricato (HTTP '+((this.status||0)) + ') — riprova'; h.style.color='#ff8f8f'}"></script>
+<script>
+// v27: self-healing od.js loader (defined BEFORE the script tag below, because
+// onerror fires while the parser is still on the src tag). The bare onerror above used to say "HTTP 0"
+// for everything (404, DNS, TLS, flaky mobile network — a <script> tag carries no
+// status). Now: probe the real URL, distinguish "server missing the file" from
+// "no network", and auto-reload once (guarded against reload loops).
+function odJsFail() {
+  var h = document.getElementById('hud');
+  var KEY = 'et-od-jsfail', last = 0;
+  try { last = parseInt(localStorage.getItem(KEY) || '0', 10); } catch (_) {}
+  if (Date.now() - last < 90000) {
+    if (h) {
+      h.innerHTML = '❌ od.js non si carica (tenta ripetuta) — <a href="javascript:location.reload()" style="color:#7fd1ff;font-weight:bold">🔄 RIPROVA</a>';
+      h.style.color = '#ff8f8f';
+    }
+    return;
+  }
+  try { localStorage.setItem(KEY, String(Date.now())); } catch (_) {}
+  if (h) { h.textContent = '❌ od.js NON caricato — verifico la rete…'; h.style.color = '#ff8f8f'; }
+  setTimeout(function () {
+    fetch('/od.js?v=27', { cache: 'no-store' })
+      .then(function (r) {
+        if (r.ok) {
+          if (h) h.textContent = '✔ rete ok — ricarico la pagina…';
+          setTimeout(function () { location.reload(); }, 600);
+        } else if (h) {
+          h.innerHTML = '❌ od.js: HTTP ' + r.status + ' dal server — <a href="javascript:location.reload()" style="color:#7fd1ff;font-weight:bold">🔄 RIPROVA</a>';
+        }
+      })
+      .catch(function (e) {
+        if (h) h.textContent = '❌ od.js: nessuna risposta dalla rete (' + ((e && e.message) || '?') + ') — ricarico tra 3 s…';
+        setTimeout(function () { location.reload(); }, 3000);
+      });
+  }, 1500);
+}
+</script>
+<script src="/od.js?v=27" onerror="odJsFail()"></script>
 <script>
 // v23: PWA — service worker per il car-mode offline (app installabile, funziona senza rete).
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
