@@ -188,40 +188,73 @@ footer { border-top:1px solid var(--line); padding:12px 16px calc(12px + env(saf
 </div>
 
 <script>
-// v27: self-healing od.js loader (defined BEFORE the script tag below, because
-// onerror fires while the parser is still on the src tag). The bare onerror above used to say "HTTP 0"
-// for everything (404, DNS, TLS, flaky mobile network — a <script> tag carries no
-// status). Now: probe the real URL, distinguish "server missing the file" from
-// "no network", and auto-reload once (guarded against reload loops).
-function odJsFail() {
-  var h = document.getElementById('hud');
-  var KEY = 'et-od-jsfail', last = 0;
-  try { last = parseInt(localStorage.getItem(KEY) || '0', 10); } catch (_) {}
-  if (Date.now() - last < 90000) {
-    if (h) {
-      h.innerHTML = '❌ od.js non si carica (tenta ripetuta) — <a href="javascript:location.reload()" style="color:#7fd1ff;font-weight:bold">🔄 RIPROVA</a>';
-      h.style.color = '#ff8f8f';
-    }
-    return;
+// v27.1: self-healing od.js loader — defined BEFORE the <script src> tag below
+// (onerror fires while the parser is still on that tag).
+// Strategy on failure: (1) probe the exact URL + show the real reason, (2) if the
+// network is OK but the <script> tag fails (SW/Brave quirk), load od.js via
+// fetch + Blob URL — a blob: script bypasses the service worker entirely, (3)
+// otherwise reload once (guarded against loops). Every dead-end offers an
+// "APRI od.js" link to the raw file: if THAT fails in a tab, the phone's
+// network cannot reach github.io (change Wi-Fi/data).
+(function () {
+  var hud = document.getElementById('hud');
+  var RAW = 'https://dnamat88.github.io/tutorenglish/od.js?v=27';
+  function setMsg(html, color) {
+    if (!hud) return;
+    hud.innerHTML = html;
+    if (color) hud.style.color = color;
   }
-  try { localStorage.setItem(KEY, String(Date.now())); } catch (_) {}
-  if (h) { h.textContent = '❌ od.js NON caricato — verifico la rete…'; h.style.color = '#ff8f8f'; }
-  setTimeout(function () {
-    fetch('/od.js?v=27', { cache: 'no-store' })
-      .then(function (r) {
-        if (r.ok) {
-          if (h) h.textContent = '✔ rete ok — ricarico la pagina…';
-          setTimeout(function () { location.reload(); }, 600);
-        } else if (h) {
-          h.innerHTML = '❌ od.js: HTTP ' + r.status + ' dal server — <a href="javascript:location.reload()" style="color:#7fd1ff;font-weight:bold">🔄 RIPROVA</a>';
-        }
+  function link(href, label) {
+    return '<a href="' + href + '" target="_blank" rel="noopener" style="color:#7fd1ff;font-weight:bold">' + label + '</a>';
+  }
+  function retry() {
+    return '<a href="javascript:location.reload()" style="color:#7fd1ff;font-weight:bold">🔄 RIPROVA</a>';
+  }
+  function probe(url) {
+    var t0 = Date.now();
+    return fetch(url, { cache: 'no-store' })
+      .then(function (r) { return { ok: r.ok, status: r.status, ms: Date.now() - t0 }; })
+      .catch(function (e) { return { ok: false, err: (e && e.message) || String(e), ms: Date.now() - t0 }; });
+  }
+  function loadViaBlob() {
+    setMsg('⚠️ rete ok ma <script> fallisce — carico od.js via fallback (fetch+blob)…', '#ffcf5c');
+    fetch('/od.js?v=27&r=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+      .then(function (code) {
+        var u = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+        var s = document.createElement('script');
+        s.src = u;
+        s.onload = function () { URL.revokeObjectURL(u); };
+        s.onerror = function () {
+          setMsg('❌ fallback fallito — ' + link(RAW, 'APRI od.js') + ' · ' + retry(), '#ff8f8f');
+        };
+        document.documentElement.appendChild(s);
       })
       .catch(function (e) {
-        if (h) h.textContent = '❌ od.js: nessuna risposta dalla rete (' + ((e && e.message) || '?') + ') — ricarico tra 3 s…';
+        setMsg('❌ fallback fallito: ' + e.message + ' — ' + link(RAW, 'APRI od.js') + ' · ' + retry(), '#ff8f8f');
+      });
+  }
+  window.odJsFail = function () {
+    var KEY = 'et-od-jsfail', last = 0;
+    try { last = parseInt(localStorage.getItem(KEY) || '0', 10); } catch (_) {}
+    var now = Date.now();
+    if (now - last < 90000) {
+      setMsg('❌ od.js non si carica (tenta ripetuta) — ' + link(RAW, 'APRI od.js in una tab') + ' · ' + retry() +
+        '<div style="font-size:12px;opacity:.85;margin-top:4px">Se od.js aperto direttamente NON carica: la rete del telefono non raggiunge github.io (cambia Wi-Fi/dati, poi ' + retry() + ').</div>',
+        '#ff8f8f');
+      return;
+    }
+    try { localStorage.setItem(KEY, String(now)); } catch (_) {}
+    setMsg('❌ od.js NON caricato — verifico la rete…', '#ff8f8f');
+    setTimeout(function () {
+      probe('/od.js?v=27').then(function (p) {
+        if (p.ok) { loadViaBlob(); return; }
+        setMsg('❌ od.js: ' + (p.err || ('HTTP ' + p.status)) + ' in ' + p.ms + ' ms — ' + link(RAW, 'APRI od.js') + ' — ricarico tra 3 s…', '#ff8f8f');
         setTimeout(function () { location.reload(); }, 3000);
       });
-  }, 1500);
-}
+    }, 1200);
+  };
+})();
 </script>
 <script src="/od.js?v=27" onerror="odJsFail()"></script>
 <script>
