@@ -16,13 +16,13 @@
  *    while online), cache fallback when offline.
  *  - All POSTs (/odlog, /chat, /asr, /reset): passthrough, never cached.
  */
-const SHELL_CACHE = 'et-od-shell-v2';;
+const SHELL_CACHE = 'et-od-shell-v3';;
 const CDN_CACHE = 'et-od-cdn-v1';
 
 self.addEventListener('install', (e) => {
   e.waitUntil((async () => {
     const c = await caches.open(SHELL_CACHE);
-    for (const u of ['/od.html', '/od.js', '/sw.js']) {
+    for (const u of ['od.html', 'od.js', 'sw.js']) {
       try { await c.add(new Request(u, { mode: 'same-origin' })); } catch (_) {}
     }
     self.skipWaiting();
@@ -67,7 +67,7 @@ self.addEventListener('fetch', (e) => {
   //    fallback so an older cached build still boots offline).
   const p = url.pathname;
   if (url.origin === self.location.origin &&
-      (p === '/od.html' || p === '/od.js' || p === '/notice')) {
+      (p.endsWith('/od.html') || p.endsWith('/od.js') || p.endsWith('/notice'))) {
     e.respondWith((async () => {
       const c = await caches.open(SHELL_CACHE);
       try {

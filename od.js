@@ -79,7 +79,12 @@ function saveCfg(patch) {
 }
 const CFG = resolveCfg();
 // PC API base: same-origin in dev (PC serves the site, pc=''); the Tailscale URL in prod.
-function api(path) { return CFG.pc + path; }
+function api(path) {
+  // v28: subpath-safe — works at site root (PC dev) and under
+  // GitHub Pages /tutorenglish/. pc empty = same-origin (relative).
+  const p = String(path).replace(/^\/+/, '');
+  return CFG.pc ? CFG.pc + '/' + p : './' + p;
+}
 let pcAlive = null;   // null=unknown, true/false after a probe
 async function probePC(timeoutMs = 3000) {
   try { const r = await fetch(api('/health'), { signal: AbortSignal.timeout(timeoutMs) }); pcAlive = r.ok; }
@@ -1364,6 +1369,7 @@ init();
 // on every page load (this is how you hear about new builds / test instructions).
 (async () => {
   try {
+    if (!CFG.pc) return; // no PC configured (e.g. GitHub Pages) → no notice endpoint
     const r = await fetch(api('/notice'));
     const j = await r.json();
     const t = (j && j.text || '').trim();

@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b0d12">
-<link rel="manifest" href="/od-manifest.json">
-<link rel="icon" href="/icon-192.png">
+<link rel="manifest" href="od-manifest.json">
+<link rel="icon" href="icon-192.png">
 <title>English Tutor · on-device</title>
 <style>
 :root { --bg:#0b0d12; --card:#141822; --line:#232a3a; --tx:#e8ecf4; --dim:#8a93a6; --acc:#4f7cff; --ok:#3ecf8e; }
@@ -118,7 +118,7 @@ footer { border-top:1px solid var(--line); padding:12px 16px calc(12px + env(saf
       <div class="mbar"><div class="mfill" id="f-tts"></div></div><div class="msz" id="s-tts"></div></div>
     <div class="mrow"><div class="mlab">👂 Ears — Whisper tiny (EN)</div>
       <div class="mbar"><div class="mfill" id="f-asr"></div></div><div class="msz" id="s-asr"></div></div>
-    <div class="msys">First load downloads ≈ 2.6 GB; after that everything is cached on the phone (brain on disk ~30 s, voice+ears instant). Wi-Fi recommended. <span style="opacity:.55">build b27.2</span></div>
+    <div class="msys">First load downloads ≈ 2.6 GB; after that everything is cached on the phone (brain on disk ~30 s, voice+ears instant). Wi-Fi recommended. <span style="opacity:.55">build b28</span></div>
   </div>
   <div id="log"></div>
   <footer>
@@ -129,7 +129,7 @@ footer { border-top:1px solid var(--line); padding:12px 16px calc(12px + env(saf
       <option value="samples/kokoro_am_adam_en.wav">adam en</option>
       <option value="samples/coach_reply_en.wav">coach en</option>
     </select>
-    <div id="hud">build b27.2 — waiting for od.js…</div>
+    <div id="hud">build b28 — waiting for od.js…</div>
   </footer>
 </div>
 
@@ -199,7 +199,7 @@ footer { border-top:1px solid var(--line); padding:12px 16px calc(12px + env(saf
 //      unregisters the SW, clears all caches and reloads (deterministic fix).
 (function () {
   var hud = document.getElementById('hud');
-  var RAW = 'https://dnamat88.github.io/tutorenglish/od.js?v=27';
+  var RAW = 'https://dnamat88.github.io/tutorenglish/od.js?v=28';
   var started = false;
   function setMsg(html, color) {
     if (!hud) return;
@@ -214,7 +214,7 @@ footer { border-top:1px solid var(--line); padding:12px 16px calc(12px + env(saf
     if (window.__odjs || started) return;
     started = true;
     setMsg('⏳ od.js non è partito (' + reason + ') — fallback fetch+blob…', '#ffcf5c');
-    fetch('/od.js?v=27', { cache: 'no-store' })
+    fetch('od.js?v=28', { cache: 'no-store' })
       .then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status + ' da github.io');
         return r.text();
@@ -241,12 +241,12 @@ footer { border-top:1px solid var(--line); padding:12px 16px calc(12px + env(saf
   setTimeout(function () { if (!window.__odjs) window.odJsFail('timeout 8 s'); }, 8000);
 })();
 </script>
-<script src="/od.js?v=27" onerror="odJsFail('errore script tag')"></script>
+<script src="od.js?v=28" onerror="odJsFail('errore script tag')"></script>
 <script>
 // v23: PWA — service worker per il car-mode offline (app installabile, funziona senza rete).
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   window.addEventListener('load', function () {
-    navigator.serviceWorker.register('/sw.js').catch(function (e) { console.warn('sw register failed', e); });
+    navigator.serviceWorker.register('sw.js').catch(function (e) { console.warn('sw register failed', e); });
   });
 }
 </script>
