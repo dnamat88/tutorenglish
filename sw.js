@@ -72,7 +72,15 @@ self.addEventListener('fetch', (e) => {
       const c = await caches.open(SHELL_CACHE);
       try {
         const res = await fetch(req);
-        if (res.ok) c.put(req, res.clone());
+        if (res.ok) {
+          // v2.1: cache under the EXACT url AND the bare pathname, so a
+          // partial install (e.g. /od.html cached but /od.js not) repairs
+          // itself on the next online load. Both keys stay in sync.
+          const bare = new Request(url.pathname, { mode: 'same-origin' });
+          const clone = res.clone();
+          c.put(req, clone.clone());
+          c.put(bare, clone);
+        }
         return res;
       } catch (_) {
         let hit = await c.match(req);
