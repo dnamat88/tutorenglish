@@ -118,7 +118,7 @@ footer { border-top:1px solid var(--line); padding:12px 16px calc(12px + env(saf
       <div class="mbar"><div class="mfill" id="f-tts"></div></div><div class="msz" id="s-tts"></div></div>
     <div class="mrow"><div class="mlab">👂 Ears — Whisper tiny (EN)</div>
       <div class="mbar"><div class="mfill" id="f-asr"></div></div><div class="msz" id="s-asr"></div></div>
-    <div class="msys">First load downloads ≈ 2.6 GB; after that everything is cached on the phone (brain on disk ~30 s, voice+ears instant). Wi-Fi recommended. <span style="opacity:.55">build b27</span></div>
+    <div class="msys">First load downloads ≈ 2.6 GB; after that everything is cached on the phone (brain on disk ~30 s, voice+ears instant). Wi-Fi recommended. <span style="opacity:.55">build b27.2</span></div>
   </div>
   <div id="log"></div>
   <footer>
@@ -129,7 +129,7 @@ footer { border-top:1px solid var(--line); padding:12px 16px calc(12px + env(saf
       <option value="samples/kokoro_am_adam_en.wav">adam en</option>
       <option value="samples/coach_reply_en.wav">coach en</option>
     </select>
-    <div id="hud">build b27 — waiting for od.js…</div>
+    <div id="hud">build b27.2 — waiting for od.js…</div>
   </footer>
 </div>
 
@@ -188,75 +188,60 @@ footer { border-top:1px solid var(--line); padding:12px 16px calc(12px + env(saf
 </div>
 
 <script>
-// v27.1: self-healing od.js loader — defined BEFORE the <script src> tag below
-// (onerror fires while the parser is still on that tag).
-// Strategy on failure: (1) probe the exact URL + show the real reason, (2) if the
-// network is OK but the <script> tag fails (SW/Brave quirk), load od.js via
-// fetch + Blob URL — a blob: script bypasses the service worker entirely, (3)
-// otherwise reload once (guarded against loops). Every dead-end offers an
-// "APRI od.js" link to the raw file: if THAT fails in a tab, the phone's
-// network cannot reach github.io (change Wi-Fi/data).
+// v27.2: bulletproof od.js loader (defined BEFORE the <script src> tag below,
+// because its onerror fires while the parser is still on that tag).
+// Layers:
+//   1. classic <script src> tag = fast path (SW-cached, works offline);
+//   2. if the tag errors OR 8 s pass without window.__odjs being set, load
+//      od.js via fetch + Blob URL — a blob: script bypasses the service
+//      worker and the script-tag machinery entirely;
+//   3. every dead-end shows the real reason plus a "pulisci" link that
+//      unregisters the SW, clears all caches and reloads (deterministic fix).
 (function () {
   var hud = document.getElementById('hud');
   var RAW = 'https://dnamat88.github.io/tutorenglish/od.js?v=27';
+  var started = false;
   function setMsg(html, color) {
     if (!hud) return;
     hud.innerHTML = html;
     if (color) hud.style.color = color;
   }
-  function link(href, label) {
-    return '<a href="' + href + '" target="_blank" rel="noopener" style="color:#7fd1ff;font-weight:bold">' + label + '</a>';
+  function a(href, label) {
+    return '<a href="' + href + '" style="color:#7fd1ff;font-weight:bold">' + label + '</a>';
   }
-  function retry() {
-    return '<a href="javascript:location.reload()" style="color:#7fd1ff;font-weight:bold">🔄 RIPROVA</a>';
-  }
-  function probe(url) {
-    var t0 = Date.now();
-    return fetch(url, { cache: 'no-store' })
-      .then(function (r) { return { ok: r.ok, status: r.status, ms: Date.now() - t0 }; })
-      .catch(function (e) { return { ok: false, err: (e && e.message) || String(e), ms: Date.now() - t0 }; });
-  }
-  function loadViaBlob() {
-    setMsg('⚠️ rete ok ma <script> fallisce — carico od.js via fallback (fetch+blob)…', '#ffcf5c');
-    fetch('/od.js?v=27&r=' + Date.now(), { cache: 'no-store' })
-      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+  var CLEAN = 'javascript:(function(){var d=function(){location.reload()};if(navigator.serviceWorker){navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){r.unregister()});if(window.caches){caches.keys().then(function(ks){ks.forEach(function(k){caches.delete(k)})}).then(d)}else{d()}})}else{d()}})()';
+  window.odJsFail = function (reason) {
+    if (window.__odjs || started) return;
+    started = true;
+    setMsg('⏳ od.js non è partito (' + reason + ') — fallback fetch+blob…', '#ffcf5c');
+    fetch('/od.js?v=27', { cache: 'no-store' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status + ' da github.io');
+        return r.text();
+      })
       .then(function (code) {
         var u = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
         var s = document.createElement('script');
         s.src = u;
-        s.onload = function () { URL.revokeObjectURL(u); };
         s.onerror = function () {
-          setMsg('❌ fallback fallito — ' + link(RAW, 'APRI od.js') + ' · ' + retry(), '#ff8f8f');
+          setMsg('❌ fallback non riuscito — ' + a(CLEAN, '🧹 pulisci cache e ricarica') + ' · ' + a('javascript:location.reload()', '🔄 riprova'), '#ff8f8f');
         };
+        s.onload = function () { URL.revokeObjectURL(u); };
         document.documentElement.appendChild(s);
       })
       .catch(function (e) {
-        setMsg('❌ fallback fallito: ' + e.message + ' — ' + link(RAW, 'APRI od.js') + ' · ' + retry(), '#ff8f8f');
+        var m = (e && e.message) || String(e);
+        var net = /Failed to fetch|Load failed|timeout|aborted|network/i.test(m);
+        setMsg('❌ od.js: ' + m + (net ? ' — il telefono non sta raggiungendo github.io (controlla Wi-Fi / dati mobili)' : '') +
+          ' — ' + a(CLEAN, '🧹 pulisci cache e ricarica') + ' · ' + a('javascript:location.reload()', '🔄 riprova') +
+          '<div style="font-size:12px;opacity:.85;margin-top:4px">Test rapido: ' + a(RAW, 'apri od.js in una tab') + ' — se vedi del codice, la rete è ok.</div>',
+          '#ff8f8f');
       });
-  }
-  window.odJsFail = function () {
-    var KEY = 'et-od-jsfail', last = 0;
-    try { last = parseInt(localStorage.getItem(KEY) || '0', 10); } catch (_) {}
-    var now = Date.now();
-    if (now - last < 90000) {
-      setMsg('❌ od.js non si carica (tenta ripetuta) — ' + link(RAW, 'APRI od.js in una tab') + ' · ' + retry() +
-        '<div style="font-size:12px;opacity:.85;margin-top:4px">Se od.js aperto direttamente NON carica: la rete del telefono non raggiunge github.io (cambia Wi-Fi/dati, poi ' + retry() + ').</div>',
-        '#ff8f8f');
-      return;
-    }
-    try { localStorage.setItem(KEY, String(now)); } catch (_) {}
-    setMsg('❌ od.js NON caricato — verifico la rete…', '#ff8f8f');
-    setTimeout(function () {
-      probe('/od.js?v=27').then(function (p) {
-        if (p.ok) { loadViaBlob(); return; }
-        setMsg('❌ od.js: ' + (p.err || ('HTTP ' + p.status)) + ' in ' + p.ms + ' ms — ' + link(RAW, 'APRI od.js') + ' — ricarico tra 3 s…', '#ff8f8f');
-        setTimeout(function () { location.reload(); }, 3000);
-      });
-    }, 1200);
   };
+  setTimeout(function () { if (!window.__odjs) window.odJsFail('timeout 8 s'); }, 8000);
 })();
 </script>
-<script src="/od.js?v=27" onerror="odJsFail()"></script>
+<script src="/od.js?v=27" onerror="odJsFail('errore script tag')"></script>
 <script>
 // v23: PWA — service worker per il car-mode offline (app installabile, funziona senza rete).
 if ('serviceWorker' in navigator && location.protocol === 'https:') {

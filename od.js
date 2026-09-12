@@ -1,3 +1,7 @@
+// v27.2: double-execution guard — od.js can be injected twice (script tag +
+// blob fallback in od.html); only the first execution proceeds. Top-level
+// return is valid in classic scripts.
+if (window.__odjs) return;
 'use strict';
 /* ============================================================
    English Tutor — on-device PWA (v0.2)
@@ -1370,3 +1374,5 @@ init();
     }
   } catch (_) {}
 })();
+// v27.2: mark loaded (od.html watchdog + double-execution guard).
+window.__odjs = 1;

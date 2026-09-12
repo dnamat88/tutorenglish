@@ -16,7 +16,7 @@
  *    while online), cache fallback when offline.
  *  - All POSTs (/odlog, /chat, /asr, /reset): passthrough, never cached.
  */
-const SHELL_CACHE = 'et-od-shell-v1';
+const SHELL_CACHE = 'et-od-shell-v2';;
 const CDN_CACHE = 'et-od-cdn-v1';
 
 self.addEventListener('install', (e) => {
