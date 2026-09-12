@@ -291,6 +291,20 @@ function brainPut(i, buf) {
     rq.onsuccess = () => res(); rq.onerror = () => rej(rq.error);
   }));
 }
+// v29: chiamata da init() quando il brain preso dalla cache non si carica, ma
+// non era mai stata scritta -> ReferenceError dentro il catch di init(), che
+// faceva fallire l'INTERO avvio (voce e ears non venivano piu' caricati).
+function brainDeleteAll() {
+  return brainIDB().then(db => new Promise((res, rej) => {
+    const st = db.transaction('files', 'readwrite').objectStore('files');
+    const rq = st.getAllKeys();
+    rq.onsuccess = () => {
+      for (const k of rq.result) if (String(k).startsWith(BRAIN_KEY + ':')) st.delete(k);
+      res();
+    };
+    rq.onerror = () => rej(rq.error);
+  }));
+}
 function brainGet(i) {
   return brainIDB().then(db => new Promise((res, rej) => {
     const rq = db.transaction('files', 'readonly').objectStore('files').get(BRAIN_KEY + ':' + i);
@@ -1355,7 +1369,7 @@ async function init() {
     try { await fn(); tlog('stage-ok', k); }
     catch (e) {
       const m = (e && (e.message || e.reason)) || String(e); tlog(k + ':fail', String(m).slice(0, 300)); errors.push([k, e]);
-      if (k === 'llm' && state.llmFromCache) { tlog('llm:cache-invalidate'); brainDeleteAll().catch(() => {}); state.llmFromCache = false; } // v14
+      if (k === 'llm' && state.llmFromCache) { tlog('llm:cache-invalidate'); try { brainDeleteAll().catch(() => {}); } catch (_) {} state.llmFromCache = false; } // v14
     }
   }
   tlog('asr:deferred', 'loads on first mic tap');
