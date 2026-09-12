@@ -1,8 +1,12 @@
-// v27.2: double-execution guard — od.js can be injected twice (script tag +
-// blob fallback in od.html); only the first execution proceeds. Top-level
-// return is valid in classic scripts.
-if (window.__odjs) return;
 'use strict';
+// v29: the v27.2 "double-execution guard" (`if (window.__odjs) return;`) was a
+// TOP-LEVEL RETURN — an "Illegal return statement" SyntaxError in a classic
+// browser script, so od.js never parsed at all and window.__odjs was never set
+// (which is exactly what the od.html watchdog was reporting). `node --check`
+// missed it because Node parses files as CommonJS modules, where top-level
+// return is legal; use `node -e "new (require('vm').Script)(code)"` instead.
+// The double-injection guard now lives in the od.html loader, which only
+// appends the blob fallback while window.__odjs is still unset.
 /* ============================================================
    English Tutor — on-device PWA (v0.2)
    brain: Gemma 4 E2B  (LiteRT-LM.js, WebGPU)
@@ -20,7 +24,7 @@ const SUP_FILES = ['tts.json', 'unicode_indexer.json',
 const VOICE = 'F1';
 const TTS_SPEED = 1.05;
 const CACHE_NAME = 'et-od-v3';
-const VERSION = '27';
+const VERSION = '29';
 
 // ---------------- config: presets (localStorage) + URL overrides ----------------
 // v27: config is chosen in the UI, not hidden in the URL. Two presets map to the two

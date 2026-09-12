@@ -7,6 +7,51 @@
 <link rel="manifest" href="od-manifest.json">
 <link rel="icon" href="icon-192.png">
 <title>English Tutor · on-device</title>
+<script>
+// v29: cattura errori — DEVE restare il primo script della pagina, così nessun
+// errore (SyntaxError di od.js compreso) può restare invisibile sul telefono,
+// dove non esiste la console. Gli errori vanno in #hudErr, che è separato da
+// #hud proprio perché od.js sovrascrive #hud con hud().
+(function () {
+  var buf = [];
+  function esc(x) { return String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+  function paint() {
+    var el = document.getElementById('hudErr');
+    if (!el) return;
+    el.innerHTML = buf.join('<br>');
+  }
+  function push(kind, msg, where, stack) {
+    buf.push('<b>ERR ' + esc(kind) + ':</b> ' + esc(msg) +
+      (where ? '<br><span style="opacity:.75">@ ' + esc(where) + '</span>' : '') +
+      (stack ? '<br><span style="opacity:.6">' + esc(stack) + '</span>' : ''));
+    while (buf.length > 4) buf.shift();
+    paint();
+  }
+  window.__odErrs = buf;
+  window.__odPushErr = push;
+  window.__odPaintErrs = paint;
+  window.addEventListener('error', function (ev) {
+    var t = ev.target;
+    if (t && t !== window && t.tagName) {          // risorsa (script/img/link) non caricata
+      push('risorsa', (t.tagName || '?') + ' non caricata', t.src || t.href || '');
+      return;
+    }
+    var msg = ev.message || (ev.error && ev.error.message) || 'errore sconosciuto';
+    // doppia iniezione innocua (script tag + blob): l'app sta già girando
+    if (window.__odjs && /already been declared|has already been/i.test(msg)) return;
+    var f = (ev.filename || '').split('/').pop();
+    var where = f + (ev.lineno ? ':' + ev.lineno + ':' + ev.colno : '');
+    var st = (ev.error && ev.error.stack) ? String(ev.error.stack).split('\n').slice(0, 2).join(' / ') : '';
+    push('od.js', msg, where, st);
+  }, true);
+  window.addEventListener('unhandledrejection', function (ev) {
+    var r = ev.reason;
+    push('promise', (r && (r.message || r)) || 'rejection', '',
+         (r && r.stack) ? String(r.stack).split('\n').slice(0, 2).join(' / ') : '');
+  });
+  document.addEventListener('DOMContentLoaded', paint);
+})();
+</script>
 <style>
 :root { --bg:#0b0d12; --card:#141822; --line:#232a3a; --tx:#e8ecf4; --dim:#8a93a6; --acc:#4f7cff; --ok:#3ecf8e; }
 * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
@@ -49,7 +94,10 @@ footer { border-top:1px solid var(--line); padding:12px 16px calc(12px + env(saf
 #mic.rec { background:#ff5d5d; animation:pulse 1.2s infinite; }
 #mic:disabled { opacity:.4; }
 @keyframes pulse { 50% { transform:scale(1.08); } }
-#hud { flex:1; font:11px/1.5 ui-monospace, monospace; color:var(--dim); white-space:pre-wrap; }
+#hudwrap { flex:1; min-width:0; }
+#hud { font:11px/1.5 ui-monospace, monospace; color:var(--dim); white-space:pre-wrap; }
+#hudErr { font:11px/1.45 ui-monospace, monospace; color:#ff8f8f; white-space:pre-wrap;
+  word-break:break-word; margin-top:4px; }
 #new, #gear { border:1px solid var(--line); background:none; color:var(--dim); border-radius:10px;
   padding:8px 12px; font-size:13px; } #gear { font-size:16px; padding:6px 10px; }
 /* ---- settings / setup overlay (v27) ---- */
@@ -118,7 +166,7 @@ footer { border-top:1px solid var(--line); padding:12px 16px calc(12px + env(saf
       <div class="mbar"><div class="mfill" id="f-tts"></div></div><div class="msz" id="s-tts"></div></div>
     <div class="mrow"><div class="mlab">👂 Ears — Whisper tiny (EN)</div>
       <div class="mbar"><div class="mfill" id="f-asr"></div></div><div class="msz" id="s-asr"></div></div>
-    <div class="msys">First load downloads ≈ 2.6 GB; after that everything is cached on the phone (brain on disk ~30 s, voice+ears instant). Wi-Fi recommended. <span style="opacity:.55">build b28</span></div>
+    <div class="msys">First load downloads ≈ 2.6 GB; after that everything is cached on the phone (brain on disk ~30 s, voice+ears instant). Wi-Fi recommended. <span style="opacity:.55">build b29</span></div>
   </div>
   <div id="log"></div>
   <footer>
@@ -129,7 +177,10 @@ footer { border-top:1px solid var(--line); padding:12px 16px calc(12px + env(saf
       <option value="samples/kokoro_am_adam_en.wav">adam en</option>
       <option value="samples/coach_reply_en.wav">coach en</option>
     </select>
-    <div id="hud">build b28 — waiting for od.js…</div>
+    <div id="hudwrap">
+      <div id="hud">build b29 — waiting for od.js…</div>
+      <div id="hudErr"></div>
+    </div>
   </footer>
 </div>
 
@@ -188,60 +239,87 @@ footer { border-top:1px solid var(--line); padding:12px 16px calc(12px + env(saf
 </div>
 
 <script>
-// v27.2: bulletproof od.js loader (defined BEFORE the <script src> tag below,
-// because its onerror fires while the parser is still on that tag).
-// Layers:
-//   1. classic <script src> tag = fast path (SW-cached, works offline);
-//   2. if the tag errors OR 8 s pass without window.__odjs being set, load
-//      od.js via fetch + Blob URL — a blob: script bypasses the service
-//      worker and the script-tag machinery entirely;
-//   3. every dead-end shows the real reason plus a "pulisci" link that
-//      unregisters the SW, clears all caches and reloads (deterministic fix).
+// v29: loader di od.js — tre esiti, tutti VISIBILI (sul telefono non c'è console).
+//   1. <script src> = fast path (passa dal service worker, funziona offline);
+//   2. watchdog 8 s → fetch + Blob URL: un blob: script bypassa il SW;
+//   3. ogni vicolo cieco dice ESATTAMENTE cosa è successo, distinguendo
+//      "il JS non è mai arrivato" (rete/SW) da "il JS è arrivato ed è
+//      crashato" (errore runtime → il testo esatto sta in #hudErr).
 (function () {
-  var hud = document.getElementById('hud');
-  var RAW = 'https://dnamat88.github.io/tutorenglish/od.js?v=28';
+  var JS  = 'od.js?v=29';
+  var RAW = 'https://dnamat88.github.io/tutorenglish/od.js?v=29';
+  var t0 = Date.now();
   var started = false;
   function setMsg(html, color) {
+    var hud = document.getElementById('hud');
     if (!hud) return;
     hud.innerHTML = html;
-    if (color) hud.style.color = color;
+    hud.style.color = color || '';
   }
   function a(href, label) {
     return '<a href="' + href + '" style="color:#7fd1ff;font-weight:bold">' + label + '</a>';
   }
   var CLEAN = 'javascript:(function(){var d=function(){location.reload()};if(navigator.serviceWorker){navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){r.unregister()});if(window.caches){caches.keys().then(function(ks){ks.forEach(function(k){caches.delete(k)})}).then(d)}else{d()}})}else{d()}})()';
+  function escapes() {
+    return a(CLEAN, '🧹 pulisci cache e ricarica') + ' · ' + a('javascript:location.reload()', '🔄 riprova');
+  }
   window.odJsFail = function (reason) {
     if (window.__odjs || started) return;
     started = true;
-    setMsg('⏳ od.js non è partito (' + reason + ') — fallback fetch+blob…', '#ffcf5c');
-    fetch('od.js?v=28', { cache: 'no-store' })
+    setMsg('⏳ od.js non è partito (' + reason + ') — provo fetch+blob…', '#ffcf5c');
+    var tf = Date.now();
+    fetch(JS, { cache: 'no-store' })
       .then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status + ' da github.io');
+        setMsg('⏳ fallback: HTTP ' + r.status + ' in ' + (Date.now() - tf) + ' ms — leggo il corpo…', '#ffcf5c');
+        if (!r.ok) throw new Error('HTTP ' + r.status + ' su ' + JS);
         return r.text();
       })
       .then(function (code) {
+        if (window.__odjs) return;                 // lo script tag è arrivato nel frattempo
+        var kb = Math.round(code.length / 1024);
+        setMsg('⏳ fallback: ' + kb + ' KB in ' + (Date.now() - tf) + ' ms — eseguo…', '#ffcf5c');
+        if (code.length < 10000) {
+          throw new Error('risposta di soli ' + kb + ' KB: non è od.js (service worker o pagina di errore?)');
+        }
         var u = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
         var s = document.createElement('script');
         s.src = u;
         s.onerror = function () {
-          setMsg('❌ fallback non riuscito — ' + a(CLEAN, '🧹 pulisci cache e ricarica') + ' · ' + a('javascript:location.reload()', '🔄 riprova'), '#ff8f8f');
+          setMsg('❌ il blob script non è partito (onerror) — ' + escapes(), '#ff8f8f');
         };
-        s.onload = function () { URL.revokeObjectURL(u); };
+        s.onload = function () {
+          URL.revokeObjectURL(u);
+          if (window.__odjs) {
+            setMsg('✅ od.js caricato dal fallback blob (' + kb + ' KB, ' + (Date.now() - t0) + ' ms)', '#3ecf8e');
+            return;
+          }
+          // Il JS è arrivato ED è stato eseguito, ma non ha raggiunto l'ultima
+          // riga: è un errore di RUNTIME, non di rete. Il testo esatto del
+          // browser è già in #hudErr (catturato dal listener nel <head>).
+          setMsg('❌ od.js è arrivato (' + kb + ' KB) ed è stato eseguito, ma è ANDATO IN ERRORE ' +
+                 'prima di finire → il motivo esatto è la riga rossa qui sotto. ' + escapes(), '#ff8f8f');
+          if (window.__odPaintErrs) window.__odPaintErrs();
+          if (window.__odErrs && !window.__odErrs.length && window.__odPushErr) {
+            window.__odPushErr('od.js', 'eseguito senza arrivare in fondo e senza errori catturati ' +
+              '(possibile return/throw silenzioso o browser troppo vecchio)', '');
+          }
+        };
         document.documentElement.appendChild(s);
       })
       .catch(function (e) {
         var m = (e && e.message) || String(e);
         var net = /Failed to fetch|Load failed|timeout|aborted|network/i.test(m);
-        setMsg('❌ od.js: ' + m + (net ? ' — il telefono non sta raggiungendo github.io (controlla Wi-Fi / dati mobili)' : '') +
-          ' — ' + a(CLEAN, '🧹 pulisci cache e ricarica') + ' · ' + a('javascript:location.reload()', '🔄 riprova') +
-          '<div style="font-size:12px;opacity:.85;margin-top:4px">Test rapido: ' + a(RAW, 'apri od.js in una tab') + ' — se vedi del codice, la rete è ok.</div>',
-          '#ff8f8f');
+        setMsg('❌ od.js NON è arrivato: ' + m +
+          (net ? ' — il telefono non sta raggiungendo github.io (Wi-Fi / dati mobili), oppure un service worker vecchio sta intercettando' : '') +
+          ' — ' + escapes() +
+          '<div style="font-size:12px;opacity:.85;margin-top:4px">Test rapido: ' + a(RAW, 'apri od.js in una tab') +
+          ' — se vedi del codice, la rete è ok ed è il service worker: usa 🧹.</div>', '#ff8f8f');
       });
   };
   setTimeout(function () { if (!window.__odjs) window.odJsFail('timeout 8 s'); }, 8000);
 })();
 </script>
-<script src="od.js?v=28" onerror="odJsFail('errore script tag')"></script>
+<script src="od.js?v=29" onerror="odJsFail('lo script tag non ha caricato il file')"></script>
 <script>
 // v23: PWA — service worker per il car-mode offline (app installabile, funziona senza rete).
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
