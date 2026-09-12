@@ -355,7 +355,13 @@ async function brainDownloadMissing(onProgress) {
   const pcSrc = api('/models/brain.litertlm');
   const order = pcAlive ? [pcSrc, GEMMA_URL] : [GEMMA_URL, pcSrc];
   for (let i = 0; i < BRAIN_N; i++) {
-    if (await brainHasChunk(i)) { tlog('llm:chunk-cached', i + '/' + BRAIN_N); continue; }
+    if (await brainHasChunk(i)) {
+      tlog('llm:chunk-cached', i + '/' + BRAIN_N);
+      // v29: un chunk gia' scaricato conta come progresso, altrimenti una
+      // ripresa mostra 0% finche' non arriva al primo chunk mancante.
+      onProgress && onProgress(i * BRAIN_CHUNK + brainChunkLen(i), BRAIN_TOTAL);
+      continue;
+    }
     const start = i * BRAIN_CHUNK, len = brainChunkLen(i), end = start + len - 1;
     tlog('llm:chunk-start', i + '/' + BRAIN_N + ' order=' + (pcAlive ? 'pc,cdn' : 'cdn,pc'));
     for (const src of order) {
@@ -437,7 +443,14 @@ async function loadLLM() {
     setBar('llm', 3, 'scaricando cervello (≈2 GB, riprendibile)…');
     tlog('llm:resume-start');
     try {
-      await brainDownloadMissing((g, t) => { got = g; total = t; });
+      // v29: onProgress aggiornava solo le variabili — nessuno chiamava setBar,
+      // quindi la barra restava ferma al 3% per tutti i 2 GB e sembrava bloccata.
+      await brainDownloadMissing((g, t) => {
+        got = g; total = t;
+        const pc = t ? (g / t) * 100 : 0;
+        setBar('llm', 3 + pc * 0.92,
+               'cervello ' + fmtBytes(g) + ' / ' + fmtBytes(t) + '  ' + pc.toFixed(1) + '%');
+      });
     } catch (e) {
       // last-resort: legacy whole-file stream (rebuilds cache from byte 0)
       tlog('llm:resume-fallback', String((e && e.message) || e).slice(0, 150));
