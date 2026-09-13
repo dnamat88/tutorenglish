@@ -24,7 +24,7 @@ const SUP_FILES = ['tts.json', 'unicode_indexer.json',
 const VOICE = 'F1';
 const TTS_SPEED = 1.05;
 const CACHE_NAME = 'et-od-v3';
-const VERSION = '31';
+const VERSION = '32';
 
 // ---------------- config: presets (localStorage) + URL overrides ----------------
 // v27: config is chosen in the UI, not hidden in the URL. Two presets map to the two
@@ -1423,7 +1423,10 @@ function stopAndProcess() {
   if (recTimer) { clearInterval(recTimer); recTimer = null; }
   (async () => {
     const blob = await stopRec();
-    if (blob.size < 16000) { hud('too short'); return; }
+    // v32: con ears=web non esiste nessun blob da pesare (la trascrizione arriva
+    // dal riconoscimento live), e da v29 stopRec() ne restituisce uno vuoto:
+    // il controllo di dimensione bocciava OGNI turno con 'too short'.
+    if (EARS !== 'web' && blob.size < 16000) { hud('too short'); return; }
     state.busy = true;
     $('#mic').disabled = true;
     doTurn(blob);
