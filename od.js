@@ -1175,7 +1175,7 @@ function pickMime() {
 }
 async function startRec() {
   if (EARS === 'web' && !((window.SpeechRecognition || window.webkitSpeechRecognition)))
-    throw new Error('SpeechRecognition non disponibile su questo browser — usa ?ears=pc');
+    throw new Error('microfono: questo browser non ha SpeechRecognition (Firefox non ce l\'ha). Apri ⚙️ → Avanzate → Orecchie (ASR) → "pc — whisper sul PC" e salva.');
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true }
   });
