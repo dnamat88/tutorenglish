@@ -24,7 +24,7 @@ const SUP_FILES = ['tts.json', 'unicode_indexer.json',
 const VOICE = 'F1';
 const TTS_SPEED = 1.05;
 const CACHE_NAME = 'et-od-v3';
-const VERSION = '32';
+const VERSION = '33';
 
 // ---------------- config: presets (localStorage) + URL overrides ----------------
 // v27: config is chosen in the UI, not hidden in the URL. Two presets map to the two
@@ -652,6 +652,17 @@ async function asrViaPC(blob) { // v25: ?ears=pc — faster-whisper on the PC, z
 }
 // v26: ?ears=web — the phone's own speech recognition (Android/Google), zero WASM
 // memory in the tab. Needs mobile data (like any phone call), never the PC.
+// v32: unisce due pezzi di parlato senza ripetizioni. La Web Speech API su
+// Android rimanda la stessa frase allungata a ogni risultato, quindi il pezzo
+// nuovo e' spesso il vecchio piu' altre parole (o lo contiene gia').
+function joinSpeech(a, b) {
+  a = (a || '').trim(); b = (b || '').trim();
+  if (!a) return b;
+  if (!b) return a;
+  if (b.startsWith(a)) return b;        // b e' a allungato
+  if (a.endsWith(b) || a.startsWith(b)) return a;  // b gia' contenuto
+  return a + ' ' + b;
+}
 function webAsrStart() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) throw new Error('SpeechRecognition non disponibile su questo browser');
@@ -662,18 +673,25 @@ function webAsrStart() {
   state.webAsr = rec;
   state.webAsrText = '';
   state.webAsrInterim = '';
+  state.webAsrDone = '';   // v32: testo delle sessioni gia' chiuse (dopo un riavvio)
   state.webAsrErr = '';
+  // v32: si concatenava il transcript di OGNI evento isFinal. Android ripete la
+  // frase dall'inizio a ogni risultato, quindi "hello" + "hello did" + "hello
+  // did you" diventava "hello hello did hello did you...". Il testo va
+  // RICOSTRUITO dall'array e.results a ogni evento, mai accumulato.
   rec.onresult = e => {
-    let interim = '';
-    for (let i = e.resultIndex; i < e.results.length; i++) {
+    let fin = '', itm = '';
+    for (let i = 0; i < e.results.length; i++) {
       const r = e.results[i];
-      if (r.isFinal) { state.webAsrText = (state.webAsrText + ' ' + r[0].transcript).trim(); state.webAsrInterim = ''; }
-      else interim += r[0].transcript;
+      const t = (r[0] && r[0].transcript || '').trim();
+      if (!t) continue;
+      if (r.isFinal) fin = joinSpeech(fin, t);
+      else itm = joinSpeech(itm, t);
     }
-    if (interim) {
-      state.webAsrInterim = interim.trim();
-      hud('👂 ' + state.webAsrInterim.slice(0, 60) + '…');
-    }
+    state.webAsrText = joinSpeech(state.webAsrDone, fin);
+    state.webAsrInterim = itm;
+    const live = joinSpeech(state.webAsrText, itm);
+    if (live) hud('👂 ' + live.slice(-60) + '…');
   };
   // v29: l'errore finiva solo nei tlog, che sul telefono (nessun PC) non va da
   // nessuna parte: il turno moriva con un generico "didn't catch that".
@@ -685,6 +703,11 @@ function webAsrStart() {
   };
   rec.onend = () => { // Web Speech auto-stops after ~8 s of silence — restart while recording
     if (state.recording && state.webAsr === rec) {
+      // v32: la sessione chiusa diventa definitiva PRIMA di ripartire, altrimenti
+      // la nuova (che riparte da e.results vuoto) cancellerebbe quanto detto.
+      state.webAsrDone = joinSpeech(state.webAsrDone, joinSpeech(state.webAsrText, state.webAsrInterim));
+      state.webAsrText = state.webAsrDone;
+      state.webAsrInterim = '';
       try { rec.start(); } catch (_) { /* already running */ }
     }
   };
@@ -774,8 +797,9 @@ function webAsrStop() {
       done = true;
       const fin = (state.webAsrText || '').trim();
       const itm = (state.webAsrInterim || '').trim();
-      tlog('asr:web-stop', fin ? 'final=' + fin.length + 'ch' : (itm ? 'SOLO parziale=' + itm.length + 'ch' : 'VUOTO'));
-      resolve(fin || itm || '');
+      const out = joinSpeech(fin, itm);   // v32: il parziale completa il finale, non lo sostituisce
+      tlog('asr:web-stop', out ? (fin ? 'final+parziale=' : 'SOLO parziale=') + out.length + 'ch' : 'VUOTO');
+      resolve(out);
     };
     rec.onend = () => setTimeout(finish, 250); // un attimo per un finale tardivo
     setTimeout(finish, 3000);                  // non appendere il turno se onend non arriva
