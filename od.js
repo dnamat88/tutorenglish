@@ -56,6 +56,11 @@ function resolveCfg() {
     tts:   s.tts   || 'wasm',
     asr:   s.asr   || 'wasm',
     recmax:(s.recmax || 30),
+    // v29: dimensiona la KV cache del brain on-device, che si alloca IN PIU' ai
+    // 2 GB di pesi. Default invariato (8192): il telefono carica bene cosi'.
+    // E' una valvola per il caso "Aw snap" a fine caricamento: ?maxtok=2048
+    // dimezza la memoria della cache senza toccare i chunk gia' in IndexedDB.
+    maxtok:(s.maxtok || 8192),
     whisper: s.whisper || 'Xenova/whisper-tiny.en',
   };
   // URL overrides (A/B testing / one-off experiments) — never written back to storage.
@@ -65,6 +70,7 @@ function resolveCfg() {
   if (URLP.get('tts')) cfg.tts = URLP.get('tts');
   if (URLP.get('asr')) cfg.asr = URLP.get('asr');
   if (URLP.get('recmax')) cfg.recmax = Math.max(5, Math.min(60, parseInt(URLP.get('recmax'), 10) || 30));
+  if (URLP.get('maxtok')) cfg.maxtok = Math.max(512, Math.min(8192, parseInt(URLP.get('maxtok'), 10) || 8192));
   if (URLP.get('whisper')) cfg.whisper = URLP.get('whisper');
   if (URLP.get('pc')) cfg.pc = URLP.get('pc').trim().replace(/\/$/, '');
   return cfg;
@@ -104,6 +110,7 @@ const WHISPER_EN_ONLY = WHISPER.endsWith('.en');
 const REC_MAX = Math.max(5, Math.min(60, CFG.recmax | 0 || 30));
 const TTS_EP = CFG.tts;   // 'wasm' | 'webgpu'
 const ASR_EP = CFG.asr;   // 'wasm' | 'webgpu'
+const MAX_TOK = Math.max(512, Math.min(8192, CFG.maxtok | 0 || 8192)); // KV cache del brain on-device
 const BRAIN = CFG.brain;  // 'device' | 'pc'
 const EARS = CFG.ears;    // 'web' | 'keep' | 'pc' | 'reload'
 
@@ -478,7 +485,7 @@ async function loadLLM() {
       stream = fromIDB;
     }
   }
-  tlog('llm:engine-create-start');
+  tlog('llm:engine-create-start', 'maxNumTokens=' + MAX_TOK);
   const t0 = performance.now();
   const tick = setInterval(() => {
     const secs = Math.round((performance.now() - t0) / 1000);
@@ -491,7 +498,7 @@ async function loadLLM() {
   }, 500);
   const engine = await litert.Engine.create({
     model: stream,
-    mainExecutorSettings: { maxNumTokens: 8192 },
+    mainExecutorSettings: { maxNumTokens: MAX_TOK },
   });
   clearInterval(tick);
   tlog('llm:engine-create-done');
@@ -512,7 +519,7 @@ async function newConversation(engine) {
       messages: [{ role: 'system', content: SYSTEM_PROMPT }],
       extra_context: { enable_thinking: false },
     },
-    sessionConfig: { maxOutputTokens: 1024 },
+    sessionConfig: { maxOutputTokens: Math.min(1024, Math.floor(MAX_TOK / 2)) },
   });
   state.conv = conv;
 }
@@ -1124,7 +1131,7 @@ async function runDiag() {
     P('uptime pagina: ' + (performance.now() / 1000).toFixed(0) + ' s');
     P('');
     P('─ Config (v27) ─');
-    P('preset=' + CFG.preset + ' · brain=' + BRAIN + ' · ears=' + EARS + ' · steps=' + TTS_STEPS + ' · recmax=' + REC_MAX);
+    P('preset=' + CFG.preset + ' · brain=' + BRAIN + ' · ears=' + EARS + ' · steps=' + TTS_STEPS + ' · recmax=' + REC_MAX + ' · maxtok=' + MAX_TOK);
     P('tts_ep=' + TTS_EP + ' · asr_ep=' + ASR_EP + ' · whisper=' + WHISPER);
     P('pc_url="' + (CFG.pc || '(vuoto = stesso sito / dev)') + '"');
     P('stored=' + JSON.stringify(readStoredCfg()));
