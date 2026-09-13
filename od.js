@@ -710,6 +710,55 @@ function webAsrHint(code) {
       return 'se si ripete, prova ⚙️ → Avanzate → Orecchie (ASR) → "keep — whisper in-app".';
   }
 }
+// v29: test isolato delle orecchie native. Avvia SOLO SpeechRecognition (niente
+// getUserMedia, niente turno) e stampa ogni evento dell'API: distingue "il
+// microfono non si apre" da "si apre ma il servizio non restituisce parole",
+// che dall'esterno sono identici ("didn't catch that").
+function testEars() {
+  const body = $set('diagbody');
+  const t0 = performance.now();
+  const lines = ['══ test orecchie native (parla in inglese per ~6 s) ══'];
+  const P = (t) => {
+    lines.push('+' + ((performance.now() - t0) / 1000).toFixed(1) + 's  ' + t);
+    body.textContent = lines.join('\n');
+  };
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { lines.push('SpeechRecognition ASSENTE su questo browser'); body.textContent = lines.join('\n'); return; }
+  let rec;
+  try { rec = new SR(); } catch (e) { lines.push('new SpeechRecognition FALLITO: ' + e.message); body.textContent = lines.join('\n'); return; }
+  const got = { audio: false, sound: false, speech: false, result: false, err: '' };
+  rec.lang = 'en-US'; rec.continuous = true; rec.interimResults = true;
+  rec.onstart       = () => P('onstart — sessione avviata');
+  rec.onaudiostart  = () => { got.audio = true; P('onaudiostart — MICROFONO APERTO'); };
+  rec.onsoundstart  = () => { got.sound = true; P('onsoundstart — suono in ingresso'); };
+  rec.onspeechstart = () => { got.speech = true; P('onspeechstart — voce riconosciuta come parlato'); };
+  rec.onresult = (e) => {
+    got.result = true;
+    let txt = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) txt += e.results[i][0].transcript;
+    P('onresult — "' + txt.trim().slice(0, 80) + '"');
+  };
+  rec.onnomatch    = () => P('onnomatch — audio ricevuto, nessuna parola riconosciuta');
+  rec.onerror      = (e) => { got.err = (e && e.error) || '?'; P('onerror: ' + got.err); };
+  rec.onspeechend  = () => P('onspeechend');
+  rec.onaudioend   = () => P('onaudioend');
+  rec.onend = () => {
+    P('onend — sessione chiusa');
+    let v;
+    if (got.result) v = 'ORECCHIE OK: il riconoscimento restituisce parole. Se il turno fallisce lo stesso, il problema è nel flusso del turno, non nell\'API.';
+    else if (got.err === 'network') v = 'IL SERVIZIO È BLOCCATO (' + got.err + '): questo browser non parla col backend vocale di Google. Servono orecchie diverse (whisper in-app o sul PC).';
+    else if (got.err) v = 'ERRORE ' + got.err + ': vedi la riga onerror qui sopra.';
+    else if (!got.audio) v = 'IL MICROFONO NON SI È MAI APERTO (nessun onaudiostart): permesso negato al sito, o microfono occupato da un\'altra app/scheda.';
+    else if (!got.speech) v = 'MICROFONO APERTO MA NESSUN PARLATO RILEVATO: l\'audio non arriva al riconoscimento (mic muto o volume nullo).';
+    else v = 'PARLATO RILEVATO MA NESSUNA PAROLA RESTITUITA: il servizio riceve la voce e non risponde — tipico di un backend vocale bloccato.';
+    P('');
+    P('VERDETTO → ' + v);
+    P('(📋 report copia anche questo)');
+  };
+  try { rec.start(); P('start() chiamato — PARLA ORA'); }
+  catch (e) { P('start() FALLITO: ' + e.message); }
+  setTimeout(() => { try { rec.stop(); } catch (_) {} }, 6000);
+}
 function webAsrStop() {
   const rec = state.webAsr;
   if (!rec) return Promise.resolve('');
