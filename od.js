@@ -495,6 +495,11 @@ async function loadLLM() {
   });
   clearInterval(tick);
   tlog('llm:engine-create-done');
+  // v29: l'engine finiva in una const locale e state.engine restava null per
+  // sempre -> streamReply() prendeva il ramo "PC mode" e mandava OGNI turno a
+  // /chat invece di usare il cervello on-device (sul telefono, senza PC,
+  // diventava ./chat -> 404). La diagnostica lo diceva: "LLM: non caricato".
+  state.engine = engine;
   await newConversation(engine);
   setBar('llm', 100, 'ready ✓', true);
   tlog('llm:ready');
