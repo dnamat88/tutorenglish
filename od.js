@@ -24,7 +24,7 @@ const SUP_FILES = ['tts.json', 'unicode_indexer.json',
 const VOICE = 'F1';
 const TTS_SPEED = 1.05;
 const CACHE_NAME = 'et-od-v3';
-const VERSION = '33';
+const VERSION = '34';
 
 // ---------------- config: presets (localStorage) + URL overrides ----------------
 // v27: config is chosen in the UI, not hidden in the URL. Two presets map to the two
@@ -663,75 +663,74 @@ function joinSpeech(a, b) {
   if (a.endsWith(b) || a.startsWith(b)) return a;  // b gia' contenuto
   return a + ' ' + b;
 }
+function partsText(parts) {
+  let out = '';
+  for (const p of (parts || [])) if (p && p.t) out = joinSpeech(out, p.t);
+  return out;
+}
+// v34: ricalcola SEMPRE il testo dai risultati indicizzati della sessione, mai
+// per accumulo: un evento ripetuto aggiorna il suo indice invece di appendersi.
+function webAsrRecompute() {
+  let fin = '', itm = '';
+  for (const p of (state.webAsrParts || [])) {
+    if (!p || !p.t) continue;
+    if (p.f) fin = joinSpeech(fin, p.t); else itm = joinSpeech(itm, p.t);
+  }
+  state.webAsrText = joinSpeech(state.webAsrDone, fin);
+  state.webAsrInterim = itm;
+}
+// v34: spegne un riconoscimento in modo DEFINITIVO. stop() su Android non è
+// immediato: l'istanza può ancora emettere onresult dopo, e senza questo
+// distacco i suoi risultati finivano nel turno successivo (frasi vecchie che
+// riapparivano). abort() scarta quanto in coda, stop() lo consegnerebbe.
+function webAsrKill(rec) {
+  if (!rec) return;
+  if (state.webAsr === rec) state.webAsr = null;
+  try { rec.onresult = null; rec.onerror = null; rec.onend = null; } catch (_) {}
+  try { if (rec.abort) rec.abort(); else rec.stop(); } catch (_) {}
+}
 function webAsrStart() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) throw new Error('SpeechRecognition non disponibile su questo browser');
+  webAsrKill(state.webAsr);          // nessuna sessione precedente può sopravvivere
   const rec = new SR();
   rec.lang = 'en-US';
   rec.continuous = true;
   rec.interimResults = true;
   state.webAsr = rec;
+  state.webAsrParts = [];            // risultati della sessione corrente, per indice
+  state.webAsrDone = '';             // testo delle sessioni già chiuse (dopo un riavvio)
   state.webAsrText = '';
   state.webAsrInterim = '';
-  state.webAsrDone = '';   // v32: testo delle sessioni gia' chiuse (dopo un riavvio)
   state.webAsrErr = '';
-  // v32: si concatenava il transcript di OGNI evento isFinal. Android ripete la
-  // frase dall'inizio a ogni risultato, quindi "hello" + "hello did" + "hello
-  // did you" diventava "hello hello did hello did you...". Il testo va
-  // RICOSTRUITO dall'array e.results a ogni evento, mai accumulato.
   rec.onresult = e => {
-    let fin = '', itm = '';
-    for (let i = 0; i < e.results.length; i++) {
+    if (state.webAsr !== rec) return;  // evento di una sessione morta: si scarta
+    for (let i = e.resultIndex; i < e.results.length; i++) {
       const r = e.results[i];
-      const t = (r[0] && r[0].transcript || '').trim();
-      if (!t) continue;
-      if (r.isFinal) fin = joinSpeech(fin, t);
-      else itm = joinSpeech(itm, t);
+      const t = ((r[0] && r[0].transcript) || '').trim();
+      if (t) state.webAsrParts[i] = { t: t, f: !!r.isFinal };
     }
-    state.webAsrText = joinSpeech(state.webAsrDone, fin);
-    state.webAsrInterim = itm;
-    const live = joinSpeech(state.webAsrText, itm);
-    if (live) hud('👂 ' + live.slice(-60) + '…');
+    webAsrRecompute();
+    const live = joinSpeech(state.webAsrText, state.webAsrInterim);
+    if (live) hud('👂 ' + live.slice(-60));
   };
-  // v29: l'errore finiva solo nei tlog, che sul telefono (nessun PC) non va da
-  // nessuna parte: il turno moriva con un generico "didn't catch that".
   rec.onerror = e => {
+    if (state.webAsr !== rec) return;
     const code = (e && e.error) || 'unknown';
     state.webAsrErr = code;
     tlog('asr:web-err', code);
     hud('👂 riconoscimento vocale: ' + code);
   };
-  rec.onend = () => { // Web Speech auto-stops after ~8 s of silence — restart while recording
-    if (state.recording && state.webAsr === rec) {
-      // v32: la sessione chiusa diventa definitiva PRIMA di ripartire, altrimenti
-      // la nuova (che riparte da e.results vuoto) cancellerebbe quanto detto.
-      state.webAsrDone = joinSpeech(state.webAsrDone, joinSpeech(state.webAsrText, state.webAsrInterim));
-      state.webAsrText = state.webAsrDone;
-      state.webAsrInterim = '';
-      try { rec.start(); } catch (_) { /* already running */ }
-    }
+  rec.onend = () => {                  // auto-stop dopo ~8 s di silenzio
+    if (state.webAsr !== rec || !state.recording) return;
+    // la sessione chiusa diventa definitiva PRIMA di ripartire: la nuova riparte
+    // da indici vuoti e cancellerebbe quanto già detto.
+    state.webAsrDone = joinSpeech(state.webAsrDone, partsText(state.webAsrParts));
+    state.webAsrParts = [];
+    webAsrRecompute();
+    try { rec.start(); } catch (_) { /* already running */ }
   };
   rec.start();
-}
-// v29: traduce i codici della Web Speech API in una istruzione utile.
-function webAsrHint(code) {
-  switch (code) {
-    case 'network':
-      return 'il riconoscimento nativo passa dai server Google e questo browser lo blocca. ' +
-             'Apri ⚙️ → Avanzate → Orecchie (ASR) → "keep — whisper in-app" e salva.';
-    case 'not-allowed':
-    case 'service-not-allowed':
-      return 'permesso negato al riconoscimento vocale: controlla i permessi del sito (microfono) ' +
-             'oppure passa a "keep — whisper in-app" in ⚙️ → Avanzate.';
-    case 'audio-capture':
-      return 'il microfono non è accessibile (forse occupato da un\'altra app o scheda).';
-    case 'no-speech':
-      return 'non ha sentito parlato: avvicina il microfono e parla subito dopo il tap.';
-    case 'aborted':
-      return 'riconoscimento interrotto prima di produrre testo.';
-    default:
-      return 'se si ripete, prova ⚙️ → Avanzate → Orecchie (ASR) → "keep — whisper in-app".';
-  }
 }
 // v29: test isolato delle orecchie native. Avvia SOLO SpeechRecognition (niente
 // getUserMedia, niente turno) e stampa ogni evento dell'API: distingue "il
@@ -785,27 +784,27 @@ function testEars() {
 function webAsrStop() {
   const rec = state.webAsr;
   if (!rec) return Promise.resolve('');
-  state.webAsr = null;
   return new Promise(resolve => {
     let done = false;
-    // v29: si teneva SOLO il testo dei risultati isFinal. Su Android il finale
-    // spesso non arriva mai (stop() chiude la sessione prima), quindi restava
-    // il solo parziale e il turno moriva con "didn't catch that" pur avendo
-    // riconosciuto tutto. Il parziale ora vale come trascrizione.
     const finish = () => {
       if (done) return;
       done = true;
-      const fin = (state.webAsrText || '').trim();
-      const itm = (state.webAsrInterim || '').trim();
-      const out = joinSpeech(fin, itm);   // v32: il parziale completa il finale, non lo sostituisce
-      tlog('asr:web-stop', out ? (fin ? 'final+parziale=' : 'SOLO parziale=') + out.length + 'ch' : 'VUOTO');
+      webAsrRecompute();
+      const out = joinSpeech(state.webAsrText, state.webAsrInterim);
+      tlog('asr:web-stop', out ? out.length + 'ch' : 'VUOTO');
+      webAsrKill(rec);                 // niente code residue nel turno successivo
+      state.webAsrParts = [];
+      state.webAsrDone = '';
+      state.webAsrText = '';           // v34: stato pulito, il turno è chiuso
+      state.webAsrInterim = '';
       resolve(out);
     };
-    rec.onend = () => setTimeout(finish, 250); // un attimo per un finale tardivo
-    setTimeout(finish, 3000);                  // non appendere il turno se onend non arriva
+    rec.onend = () => setTimeout(finish, 250);   // un attimo per un finale tardivo
+    setTimeout(finish, 3000);                    // non appendere il turno
     try { rec.stop(); } catch (_) { finish(); }
   });
 }
+
 // v27: file-based ASR for sample/test mode. `ears=web` only listens to the live mic
 // and cannot take a file, so sample mode always uses this path instead: prefer the PC
 // (zero phone memory), else in-app whisper. Works regardless of the active EARS.
