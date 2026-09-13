@@ -24,7 +24,7 @@ const SUP_FILES = ['tts.json', 'unicode_indexer.json',
 const VOICE = 'F1';
 const TTS_SPEED = 1.05;
 const CACHE_NAME = 'et-od-v3';
-const VERSION = '37';
+const VERSION = '38';
 
 // ---------------- config: presets (localStorage) + URL overrides ----------------
 // v27: config is chosen in the UI, not hidden in the URL. Two presets map to the two
@@ -741,7 +741,15 @@ function webAsrStart() {
     }
     webAsrRecompute();
     const live = joinSpeech(state.webAsrText, state.webAsrInterim);
-    if (live) hud('👂 ' + live.slice(-60));
+    if (live) {
+      hud('👂 ' + live.slice(-60));
+      // v38: mostra in diretta cio' che viene capito, nella conversazione e non
+      // solo nella riga in fondo: se il riconoscimento sbaglia lo si vede subito
+      // e si puo' ripetere senza aspettare la risposta del coach.
+      if (!state.liveBubble) state.liveBubble = addBubble('you', '…');
+      state.liveBubble.textContent = live;
+      const log = $('#log'); if (log) log.scrollTop = log.scrollHeight;
+    }
   };
   rec.onerror = e => {
     if (state.webAsr !== rec) return;
@@ -1025,6 +1033,15 @@ function getAudioCtx() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   return audioCtx;
 }
+// v38: interrompe il coach. Serve perche' in ears=web il microfono lo gestisce
+// SpeechRecognition, senza la cancellazione d'eco che avevamo con getUserMedia:
+// se il coach sta ancora parlando quando si tocca il microfono, la sua voce
+// entra nella trascrizione e sporca la frase dell'utente.
+function stopSpeaking() {
+  state.ttsQ = [];
+  try { if (state.ttsSrc) state.ttsSrc.stop(); } catch (_) {}
+  state.ttsSrc = null;
+}
 function playWav(wav, sampleRate) {
   return new Promise(resolve => {
     const ctx = getAudioCtx();
@@ -1036,7 +1053,8 @@ function playWav(wav, sampleRate) {
       const src = ctx.createBufferSource();
       src.buffer = buf;
       src.connect(ctx.destination);
-      src.onended = () => resolve();
+      src.onended = () => { if (state.ttsSrc === src) state.ttsSrc = null; resolve(); };
+      state.ttsSrc = src;   // v38: riferimento per poter interrompere (vedi stopSpeaking)
       src.start();
     };
     if (ctx.state === 'suspended') {
@@ -1334,6 +1352,7 @@ async function startRec() {
   // riconoscimento di ricevere audio: ogni turno finiva con transcript vuoto
   // ("didn't catch that"), spesso senza nemmeno un evento onerror.
   if (EARS === 'web') {
+    state.liveBubble = null;
     state.chunks = [];
     state.stream = null;
     state.rec = null;
@@ -1397,6 +1416,7 @@ async function doTurn(blob) {
   }
   turn.asrMs = performance.now() - tStop;
   if (!text) {
+    if (state.liveBubble) { try { state.liveBubble.remove(); } catch (_) {} state.liveBubble = null; }
     const err = EARS === 'web' ? state.webAsrErr : '';
     addBubble('sys', 'didn’t catch that — tap the mic and try again' +
       (err ? '\n👂 orecchie web: ' + err + ' — ' + webAsrHint(err) : ''));
@@ -1404,7 +1424,12 @@ async function doTurn(blob) {
     $('#mic').disabled = false;
     return;
   }
-  addBubble('you', text);
+  if (state.liveBubble) {            // v38: riusa la bolla mostrata in diretta
+    state.liveBubble.textContent = text;
+    state.liveBubble = null;
+  } else {
+    addBubble('you', text);
+  }
   turn.liveEl = addBubble('coach', '…');
 
   try {
@@ -1453,6 +1478,7 @@ $('#mic').addEventListener('click', async () => {
   try { const c = getAudioCtx(); if (c.state !== 'running') c.resume().catch(() => {}); } catch (_) {}
   if (!state.recording) {
     try {
+      stopSpeaking();          // v38: silenzia il coach prima di ascoltare
       await startRec();
       hud('🔴 registrazione — tocca per fermare (max ' + REC_MAX + ' s)');
       const t0 = Date.now();
