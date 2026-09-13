@@ -169,7 +169,7 @@ footer { border-top:1px solid var(--line); padding:12px 16px calc(12px + env(saf
       <div class="mbar"><div class="mfill" id="f-tts"></div></div><div class="msz" id="s-tts"></div></div>
     <div class="mrow"><div class="mlab">👂 Ears — Whisper tiny (EN)</div>
       <div class="mbar"><div class="mfill" id="f-asr"></div></div><div class="msz" id="s-asr"></div></div>
-    <div class="msys">First load downloads ≈ 2.6 GB; after that everything is cached on the phone (brain on disk ~30 s, voice+ears instant). Wi-Fi recommended. <span style="opacity:.55">build b34</span></div>
+    <div class="msys">First load downloads ≈ 2.6 GB; after that everything is cached on the phone (brain on disk ~30 s, voice+ears instant). Wi-Fi recommended. <span style="opacity:.55">build b35</span></div>
   </div>
   <div id="log"></div>
   <footer>
@@ -181,7 +181,7 @@ footer { border-top:1px solid var(--line); padding:12px 16px calc(12px + env(saf
       <option value="samples/coach_reply_en.wav">coach en</option>
     </select>
     <div id="hudwrap">
-      <div id="hud">build b34 — waiting for od.js…</div>
+      <div id="hud">build b35 — waiting for od.js…</div>
       <div id="hudErr"></div>
     </div>
   </footer>
@@ -249,8 +249,8 @@ footer { border-top:1px solid var(--line); padding:12px 16px calc(12px + env(saf
 //      "il JS non è mai arrivato" (rete/SW) da "il JS è arrivato ed è
 //      crashato" (errore runtime → il testo esatto sta in #hudErr).
 (function () {
-  var JS  = 'od.js?v=34';
-  var RAW = 'https://dnamat88.github.io/tutorenglish/od.js?v=34';
+  var JS  = 'od.js?v=35';
+  var RAW = 'https://dnamat88.github.io/tutorenglish/od.js?v=35';
   var t0 = Date.now();
   var started = false;
   function setMsg(html, color) {
@@ -322,7 +322,7 @@ footer { border-top:1px solid var(--line); padding:12px 16px calc(12px + env(saf
   setTimeout(function () { if (!window.__odjs) window.odJsFail('timeout 8 s'); }, 8000);
 })();
 </script>
-<script src="od.js?v=34" onerror="odJsFail('lo script tag non ha caricato il file')"></script>
+<script src="od.js?v=35" onerror="odJsFail('lo script tag non ha caricato il file')"></script>
 <script>
 // v23: PWA — service worker per il car-mode offline (app installabile, funziona senza rete).
 if ('serviceWorker' in navigator && location.protocol === 'https:') {

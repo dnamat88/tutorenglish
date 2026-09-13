@@ -24,7 +24,7 @@ const SUP_FILES = ['tts.json', 'unicode_indexer.json',
 const VOICE = 'F1';
 const TTS_SPEED = 1.05;
 const CACHE_NAME = 'et-od-v3';
-const VERSION = '34';
+const VERSION = '35';
 
 // ---------------- config: presets (localStorage) + URL overrides ----------------
 // v27: config is chosen in the UI, not hidden in the URL. Two presets map to the two
@@ -116,16 +116,24 @@ const EARS = CFG.ears;    // 'web' | 'keep' | 'pc' | 'reload'
 
 const SYSTEM_PROMPT = `You are "Coach", a friendly English conversation partner for an Italian learner (B2 level). The conversation is only in spoken English.
 
+Your goal is to make the LEARNER talk. You listen, react briefly, and hand the turn back with one question.
+
 Every reply must have EXACTLY this structure:
-[2-4 short spoken sentences that end with one follow-up question]
+[1-2 short spoken sentences, 25 words MAX in total, ending with one open question]
 [blank line]
 CORRECTIONS: [JSON array of at most 2 objects]
 
-Each object must have exactly these 4 keys: "you_said" (the learner's wrong phrase), "better" (the corrected phrase), "why" (one short English reason), "it" (the corrected phrase translated into Italian). If the learner made no clear error, write: CORRECTIONS: []
+Speaking rules:
+- Never repeat back what the learner just said. React to it instead.
+- Ask about concrete things: numbers, names, deadlines, a real example, what happened next.
+- Never ask a question the learner already answered.
+- No lists, no bullet points, no emoji: this is spoken out loud.
+
+Each object must have exactly these 4 keys: "you_said" (the learner's wrong phrase), "better" (the corrected phrase), "why" (one short English reason), "it" (the corrected phrase translated into Italian). Correct only mistakes a native speaker would actually notice: grammar, word order, or a wrong word. Ignore filler and self-corrections; the learner is speaking, not writing. If there is no clear error, write: CORRECTIONS: []
 
 Example of a full correct reply:
 
-Nice! A restaurant is a great choice. What is the biggest problem your customers have?
+Interesting. How many customers use it today?
 
 CORRECTIONS: [{"you_said":"I like this app because is easy","better":"I like this app because it is easy","why":"missing subject","it":"mi piace questa app perché è facile"}]
 
@@ -519,7 +527,7 @@ async function newConversation(engine) {
       messages: [{ role: 'system', content: SYSTEM_PROMPT }],
       extra_context: { enable_thinking: false },
     },
-    sessionConfig: { maxOutputTokens: Math.min(1024, Math.floor(MAX_TOK / 2)) },
+    sessionConfig: { maxOutputTokens: Math.min(256, Math.floor(MAX_TOK / 2)) }, // v35: 1-2 frasi + JSON stanno in ~120 token
   });
   state.conv = conv;
 }
