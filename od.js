@@ -1216,6 +1216,20 @@ function pickMime() {
 async function startRec() {
   if (EARS === 'web' && !((window.SpeechRecognition || window.webkitSpeechRecognition)))
     throw new Error('microfono: questo browser non ha SpeechRecognition (Firefox non ce l\'ha). Apri ⚙️ → Avanzate → Orecchie (ASR) → "pc — whisper sul PC" e salva.');
+  // v29: con ears=web NON apriamo getUserMedia/MediaRecorder. Il blob registrato
+  // non viene mai usato (doASR legge il transcript live di SpeechRecognition) e
+  // su Android tenere il microfono aperto con MediaRecorder impedisce al
+  // riconoscimento di ricevere audio: ogni turno finiva con transcript vuoto
+  // ("didn't catch that"), spesso senza nemmeno un evento onerror.
+  if (EARS === 'web') {
+    state.chunks = [];
+    state.stream = null;
+    state.rec = null;
+    state.recording = true;
+    $('#mic').classList.add('rec');
+    webAsrStart();
+    return;
+  }
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true }
   });
@@ -1235,8 +1249,9 @@ function stopRec() {
   const stream = state.stream;
   state.recording = false;
   $('#mic').classList.remove('rec');
-  rec.stop();
   if (EARS === 'web' && state.webAsr) { try { state.webAsr.onend = () => {}; } catch (_) {} } // v26: no auto-restart
+  if (!rec) return Promise.resolve(new Blob([], { type: 'audio/webm' })); // v29: ears=web, nessun MediaRecorder
+  rec.stop();
   return new Promise(resolve => {
     rec.onstop = () => {
       stream.getTracks().forEach(t => t.stop());
