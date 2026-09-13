@@ -662,6 +662,7 @@ function webAsrStart() {
   state.webAsr = rec;
   state.webAsrText = '';
   state.webAsrInterim = '';
+  state.webAsrErr = '';
   rec.onresult = e => {
     let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -674,13 +675,40 @@ function webAsrStart() {
       hud('👂 ' + state.webAsrInterim.slice(0, 60) + '…');
     }
   };
-  rec.onerror = e => tlog('asr:web-err', e.error || 'unknown');
+  // v29: l'errore finiva solo nei tlog, che sul telefono (nessun PC) non va da
+  // nessuna parte: il turno moriva con un generico "didn't catch that".
+  rec.onerror = e => {
+    const code = (e && e.error) || 'unknown';
+    state.webAsrErr = code;
+    tlog('asr:web-err', code);
+    hud('👂 riconoscimento vocale: ' + code);
+  };
   rec.onend = () => { // Web Speech auto-stops after ~8 s of silence — restart while recording
     if (state.recording && state.webAsr === rec) {
       try { rec.start(); } catch (_) { /* already running */ }
     }
   };
   rec.start();
+}
+// v29: traduce i codici della Web Speech API in una istruzione utile.
+function webAsrHint(code) {
+  switch (code) {
+    case 'network':
+      return 'il riconoscimento nativo passa dai server Google e questo browser lo blocca. ' +
+             'Apri ⚙️ → Avanzate → Orecchie (ASR) → "keep — whisper in-app" e salva.';
+    case 'not-allowed':
+    case 'service-not-allowed':
+      return 'permesso negato al riconoscimento vocale: controlla i permessi del sito (microfono) ' +
+             'oppure passa a "keep — whisper in-app" in ⚙️ → Avanzate.';
+    case 'audio-capture':
+      return 'il microfono non è accessibile (forse occupato da un\'altra app o scheda).';
+    case 'no-speech':
+      return 'non ha sentito parlato: avvicina il microfono e parla subito dopo il tap.';
+    case 'aborted':
+      return 'riconoscimento interrotto prima di produrre testo.';
+    default:
+      return 'se si ripete, prova ⚙️ → Avanzate → Orecchie (ASR) → "keep — whisper in-app".';
+  }
 }
 function webAsrStop() {
   const rec = state.webAsr;
@@ -1156,7 +1184,7 @@ async function runDiag() {
     P('─ Modelli (stato live) ─');
     P('stage=' + state.stage + ' · ready=' + state.ready + ' · busy=' + state.busy);
     P('LLM: ' + (BRAIN === 'pc' ? 'sul PC (via /chat, Qwen 27B)' : state.engine ? 'caricato in-app' + (state.llmFromCache ? ' [da IDB cache]' : '') : 'non caricato'));
-    P('ASR: ' + (state.asr ? 'whisper carico (' + state.asrDevice + ')' : 'non caricato — lazy al 1° tap') + (EARS === 'web' ? ' · attivo: Web Speech (no whisper)' : ''));
+    P('ASR: ' + (state.asr ? 'whisper carico (' + state.asrDevice + ')' : 'non caricato — lazy al 1° tap') + (EARS === 'web' ? ' · attivo: Web Speech (no whisper)' + (state.webAsrErr ? ' · ULTIMO ERRORE: ' + state.webAsrErr : '') : ''));
     P('TTS: ' + (state.tts ? 'Supertonic carico (' + (state.ttsEp || '?') + ')' : 'non caricato'));
     P('');
     P('Gate test: UNA sola tab · preset 🚗 Macchina · 10 turni + 2 sample 🎧 · nessun crash.');
@@ -1242,7 +1270,9 @@ async function doTurn(blob) {
   }
   turn.asrMs = performance.now() - tStop;
   if (!text) {
-    addBubble('sys', 'didn’t catch that — tap the mic and try again');
+    const err = EARS === 'web' ? state.webAsrErr : '';
+    addBubble('sys', 'didn’t catch that — tap the mic and try again' +
+      (err ? '\n👂 orecchie web: ' + err + ' — ' + webAsrHint(err) : ''));
     state.busy = false;
     $('#mic').disabled = false;
     return;
