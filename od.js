@@ -24,7 +24,7 @@ const SUP_FILES = ['tts.json', 'unicode_indexer.json',
 const VOICE = 'F1';
 const TTS_SPEED = 1.05;
 const CACHE_NAME = 'et-od-v3';
-const VERSION = '35';
+const VERSION = '36';
 
 // ---------------- config: presets (localStorage) + URL overrides ----------------
 // v27: config is chosen in the UI, not hidden in the URL. Two presets map to the two
@@ -128,6 +128,8 @@ Speaking rules:
 - Ask about concrete things: numbers, names, deadlines, a real example, what happened next.
 - Never ask a question the learner already answered.
 - No lists, no bullet points, no emoji: this is spoken out loud.
+
+The text you receive comes from speech recognition, not from typing. Proper nouns are often misheard ("Matteo from Cherry Bank" can arrive as "Terry from Bangkok"). Never correct or comment on names, places or brands, and never build your reply around a word that looks misheard: ask about it naturally instead. Never list a misheard word as a correction.
 
 Each object must have exactly these 4 keys: "you_said" (the learner's wrong phrase), "better" (the corrected phrase), "why" (one short English reason), "it" (the corrected phrase translated into Italian). Correct only mistakes a native speaker would actually notice: grammar, word order, or a wrong word. Ignore filler and self-corrections; the learner is speaking, not writing. If there is no clear error, write: CORRECTIONS: []
 
@@ -663,12 +665,35 @@ async function asrViaPC(blob) { // v25: ?ears=pc — faster-whisper on the PC, z
 // v32: unisce due pezzi di parlato senza ripetizioni. La Web Speech API su
 // Android rimanda la stessa frase allungata a ogni risultato, quindi il pezzo
 // nuovo e' spesso il vecchio piu' altre parole (o lo contiene gia').
+function speechNorm(x) {
+  return (x || '').toLowerCase().replace(/[^\p{L}\p{N}\s']/gu, '').replace(/\s+/g, ' ').trim();
+}
+// v36: il confronto era sensibile a maiuscole e punteggiatura. Android manda gli
+// interim in minuscolo e i final capitalizzati e puntati, quindi "i am matteo
+// from cherry bank" e "I am Matteo from Cherry Bank." non risultavano la stessa
+// frase e finivano CONCATENATE: è la duplicazione che si continuava a vedere.
+// Ora il confronto è normalizzato e si fondono anche le sovrapposizioni parziali
+// (coda di a uguale alla testa di b), tipiche quando il riconoscimento riparte.
 function joinSpeech(a, b) {
   a = (a || '').trim(); b = (b || '').trim();
   if (!a) return b;
   if (!b) return a;
-  if (b.startsWith(a)) return b;        // b e' a allungato
-  if (a.endsWith(b) || a.startsWith(b)) return a;  // b gia' contenuto
+  const aw = a.split(/\s+/).map(speechNorm).filter(Boolean);
+  const bw = b.split(/\s+/).map(w => ({ o: w, n: speechNorm(w) })).filter(x => x.n);
+  if (!aw.length) return b;
+  if (!bw.length) return a;
+  const na = aw.join(' '), nb = bw.map(x => x.n).join(' ');
+  if (na === nb) return a;                              // stessa frase: tiene la prima
+                                                        // (in webAsrStop è il risultato
+                                                        //  finale, meglio punteggiato)
+  if (nb.startsWith(na)) return b;                      // b è a, più completo
+  if (na.startsWith(nb) || na.endsWith(nb)) return a;   // b già contenuto in a
+  for (let k = Math.min(aw.length, bw.length); k > 0; k--) {
+    if (aw.slice(-k).join(' ') === bw.slice(0, k).map(x => x.n).join(' ')) {
+      const rest = bw.slice(k).map(x => x.o).join(' ');
+      return rest ? a + ' ' + rest : a;
+    }
+  }
   return a + ' ' + b;
 }
 function partsText(parts) {
