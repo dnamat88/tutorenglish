@@ -24,7 +24,7 @@ const SUP_FILES = ['tts.json', 'unicode_indexer.json',
 const VOICE = 'F1';
 const TTS_SPEED = 1.05;
 const CACHE_NAME = 'et-od-v3';
-const VERSION = '30';
+const VERSION = '31';
 
 // ---------------- config: presets (localStorage) + URL overrides ----------------
 // v27: config is chosen in the UI, not hidden in the URL. Two presets map to the two
@@ -667,7 +667,7 @@ function webAsrStart() {
     let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const r = e.results[i];
-      if (r.isFinal) state.webAsrText = (state.webAsrText + ' ' + r[0].transcript).trim();
+      if (r.isFinal) { state.webAsrText = (state.webAsrText + ' ' + r[0].transcript).trim(); state.webAsrInterim = ''; }
       else interim += r[0].transcript;
     }
     if (interim) {
@@ -765,9 +765,20 @@ function webAsrStop() {
   state.webAsr = null;
   return new Promise(resolve => {
     let done = false;
-    const finish = () => { if (!done) { done = true; resolve(state.webAsrText || ''); } };
-    rec.onend = finish;
-    setTimeout(finish, 3000); // don't hang the turn if onend never lands
+    // v29: si teneva SOLO il testo dei risultati isFinal. Su Android il finale
+    // spesso non arriva mai (stop() chiude la sessione prima), quindi restava
+    // il solo parziale e il turno moriva con "didn't catch that" pur avendo
+    // riconosciuto tutto. Il parziale ora vale come trascrizione.
+    const finish = () => {
+      if (done) return;
+      done = true;
+      const fin = (state.webAsrText || '').trim();
+      const itm = (state.webAsrInterim || '').trim();
+      tlog('asr:web-stop', fin ? 'final=' + fin.length + 'ch' : (itm ? 'SOLO parziale=' + itm.length + 'ch' : 'VUOTO'));
+      resolve(fin || itm || '');
+    };
+    rec.onend = () => setTimeout(finish, 250); // un attimo per un finale tardivo
+    setTimeout(finish, 3000);                  // non appendere il turno se onend non arriva
     try { rec.stop(); } catch (_) { finish(); }
   });
 }
