@@ -16,7 +16,7 @@
  *    while online), cache fallback when offline.
  *  - All POSTs (/odlog, /chat, /asr, /reset): passthrough, never cached.
  */
-const SHELL_CACHE = 'et-od-shell-v4'; // v29: bump = l'activate cancella le shell vecchie (od.js rotto pre-v29)
+const SHELL_CACHE = 'et-od-shell-v5'; // v29: bump = l'activate cancella le shell vecchie (od.js rotto pre-v29)
 const CDN_CACHE = 'et-od-cdn-v1';
 
 self.addEventListener('install', (e) => {
@@ -71,7 +71,13 @@ self.addEventListener('fetch', (e) => {
     e.respondWith((async () => {
       const c = await caches.open(SHELL_CACHE);
       try {
-        const res = await fetch(req);
+        // v5: la fetch normale poteva essere servita dalla cache HTTP del browser
+        // (max-age=600 su GitHub Pages), quindi un deploy nuovo non arrivava fino
+        // alla scadenza e serviva un ?nc= a mano. 'reload' va sempre in rete;
+        // se la rete manca si cade comunque nella cache, sotto.
+        let res;
+        try { res = await fetch(new Request(req.url, { cache: 'reload', mode: 'same-origin' })); }
+        catch (_) { res = await fetch(req); }
         if (res.ok) {
           // v2.1: cache under the EXACT url AND the bare pathname, so a
           // partial install (e.g. /od.html cached but /od.js not) repairs
